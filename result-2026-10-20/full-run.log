@@ -1,0 +1,24 @@
+[jbang] Building jar for VetDb.java...
+[bestforpet] 209 clinics in the REST API, processing 209
+[pia] 2226 listings in the REST API, processing 2226
+[ratemyvet] 3939 clinic pages in the sitemap, processing 3939
+[vetnet] 1116 clinic profiles in the sitemap, processing 1116
+[ratemyvet] 100/3939
+[pia] 100/2226
+[vetnet] 100/1116
+[ratemyvet] 200/3939
+[pia] 200/2226
+[ratemyvet] 300/3939
+[pia] 300/2226
+[bestforpet] 50/209
+[ratemyvet] 400/3939
+[pia] 400/2226
+[ratemyvet] 500/3939
+[pia] 500/2226
+[bestforpet] 100/209
+[bestforpet] 150/209
+[pia] 600/2226
+[ratemyvet] 600/3939
+[bestforpet] 200/209
+[pia] 700/2226
+[ratemyvet] 700/3939
