@@ -97,7 +97,7 @@ public class VetDb implements Runnable {
 
     static class SourceOptions {
         @Option(names = "--source", defaultValue = "all", split = ",", paramLabel = "<name>",
-            description = "Sources to run: all, or a comma separated list of ratemyvet, bestforpet, pia, vetnet (default: ${DEFAULT-VALUE})")
+            description = "Sources to run: all, or a comma separated list of ratemyvet, bestforpet, vetnet (default: ${DEFAULT-VALUE})")
         List<String> sources;
 
         @Option(names = "--limit", defaultValue = "0", paramLabel = "<n>",
@@ -106,7 +106,8 @@ public class VetDb implements Runnable {
     }
 
     static List<Source> allSources() {
-        return List.of(new RateMyVetSource(), new BestForPetSource(), new PiaSource(), new VetNetSource());
+        // PIA is intentionally not part of the active pipeline. Its mostly 2016 listings create too many stale duplicates.
+        return List.of(new RateMyVetSource(), new BestForPetSource(), new VetNetSource());
     }
 
     // ------------------------------------------------------------------ commands
@@ -241,7 +242,7 @@ public class VetDb implements Runnable {
             .filter(s -> names.contains("all") || names.contains(s.name()))
             .toList();
         if (selected.isEmpty()) {
-            System.err.println("No source matches " + names + "; use all, ratemyvet, bestforpet, pia or vetnet");
+            System.err.println("No source matches " + names + "; use all, ratemyvet, bestforpet or vetnet");
             return 2;
         }
         Map<String, List<SourceRecord>> results = new ConcurrentHashMap<>();
@@ -280,7 +281,7 @@ public class VetDb implements Runnable {
     }
 
     static List<Clinic> mergeAndSave(Db db) throws Exception {
-        List<SourceRecord> records = db.loadSourceRecords();
+        List<SourceRecord> records = loadActiveSourceRecords(db);
         List<Clinic> clinics = Merger.merge(records, db.loadEnrichment());
         db.saveClinics(clinics);
         printSummary(records, clinics);
@@ -289,12 +290,26 @@ public class VetDb implements Runnable {
 
     static int export(Path dbFile, Path outDir) throws Exception {
         try (Db db = new Db(dbFile)) {
-            List<Clinic> clinics = mergeAndSave(db);
-            Exporter.Summary s = Exporter.export(outDir, clinics, db.loadSourceRecords());
+            List<SourceRecord> records = loadActiveSourceRecords(db);
+            List<Clinic> clinics = mergeAndSave(db, records);
+            Exporter.Summary s = Exporter.export(outDir, clinics, records);
             System.out.printf("Wrote %s: %d clinics, %d to review, %d rejected%n",
                 outDir.resolve("clinics.xlsx"), s.clinics(), s.needsReview(), s.rejected());
         }
         return 0;
+    }
+
+    private static List<Clinic> mergeAndSave(Db db, List<SourceRecord> records) throws Exception {
+        List<Clinic> clinics = Merger.merge(records, db.loadEnrichment());
+        db.saveClinics(clinics);
+        printSummary(records, clinics);
+        return clinics;
+    }
+
+    private static List<SourceRecord> loadActiveSourceRecords(Db db) throws Exception {
+        return db.loadSourceRecords().stream()
+            .filter(r -> !PiaSource.NAME.equals(r.source()))
+            .toList();
     }
 
     static int enrichAbr(Path dbFile, Path cacheDir, String userAgent, int limit, boolean refresh) throws Exception {
@@ -311,7 +326,7 @@ public class VetDb implements Runnable {
             AbrClient abr = new AbrClient(fetcher, guid);
             int looked = 0;
             Map<String, Integer> outcomes = new TreeMap<>();
-            for (Clinic c : Merger.merge(db.loadSourceRecords(), enrichment)) {
+            for (Clinic c : Merger.merge(loadActiveSourceRecords(db), enrichment)) {
                 if (c.verification() == Clinic.Verification.REJECTED || (!refresh && alreadyDone(c, done))) {
                     continue;
                 }
@@ -344,7 +359,7 @@ public class VetDb implements Runnable {
             Map<String, Enrichment> done = enrichment.getOrDefault("google", Map.of());
             GooglePlacesClient google = new GooglePlacesClient(fetcher, key);
             Map<String, Integer> outcomes = new TreeMap<>();
-            for (Clinic c : Merger.merge(db.loadSourceRecords(), enrichment)) {
+            for (Clinic c : Merger.merge(loadActiveSourceRecords(db), enrichment)) {
                 if (c.verification() == Clinic.Verification.REJECTED || (!refresh && alreadyDone(c, done))) {
                     continue;
                 }

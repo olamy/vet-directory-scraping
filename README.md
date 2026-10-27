@@ -1,15 +1,16 @@
 # vet-directory-scraping
 
-A JBang tool that builds one clean database of Australian vet clinics and hospitals from four online directories:
+A JBang tool that builds one clean database of Australian vet clinics and hospitals from three active online directories:
 
 | Source | What it brings |
 |---|---|
 | [RateMyVet](https://ratemyvet.com.au/) (reference list, ~3,900 clinics) | Address, phone, website, Google rating and review count, species, after-hours, home visits |
 | [BestForPet](https://bestforpet.com.au/find-a-vet/) (~210 clinics) | Email, opening hours, team size, services, payment plans, wellness plan, online booking |
-| [PIA Vet Directory](https://www.piavetdirectory.com.au/) (~2,200 listings, mostly 2016 data) | Name, phone, website, address, mobile vet flag |
 | [vet.net.au](https://www.vet.net.au/) (~1,100 clinics) | Opening hours, staff list, Facebook/Instagram, pet services |
 
 Optionally it adds [ABN Lookup](https://abr.business.gov.au/) data (ABN, registered name, ABN status and date) and [Google Places](https://developers.google.com/maps/documentation/places/web-service/text-search) data (Maps link, rating, review count, closed check).
+
+The old [PIA Vet Directory](https://www.piavetdirectory.com.au/) source is intentionally ignored by the main pipeline because its mostly 2016 listings create many stale duplicate clinics. Existing `pia` records in an older SQLite database are skipped during merge, enrichment and export.
 
 ## Requirements
 
@@ -58,7 +59,7 @@ The usual order is `fetch` → `enrich-abr` → `enrich-google` → `export`. Ea
 | `--cache=<folder>` | `cache` | `fetch`, `parse`, `enrich-abr`, `enrich-google`, `all` | Where the HTTP responses are kept (one gzipped file per URL) |
 | `--user-agent=<text>` | `Mozilla/5.0 (X11; Linux x86_64) vet-directory-builder/1.0` | `fetch`, `enrich-abr`, `enrich-google`, `all` | User-Agent header sent with every request |
 | `--out=<folder>` | `out` | `export`, `all` | Where the CSV and XLSX files are written. Existing files are overwritten |
-| `--source=<name>[,<name>...]` | `all` | `fetch`, `parse`, `all` | Which sites to scrape: `all`, or any of `ratemyvet`, `bestforpet`, `pia`, `vetnet`, comma separated |
+| `--source=<name>[,<name>...]` | `all` | `fetch`, `parse`, `all` | Which sites to scrape: `all`, or any of `ratemyvet`, `bestforpet`, `vetnet`, comma separated |
 | `--limit=<n>` | `0` (no limit) | `fetch`, `parse`, `all` | Only the first N listings of each selected site |
 
 ### `fetch`
@@ -172,7 +173,6 @@ Each site gets its own minimum gap between two requests. The sites run in parall
 |---|---|---|
 | ratemyvet.com.au | 1.5 s | ~3,940 pages + 2 sitemaps |
 | bestforpet.com.au | 2.5 s (Wordfence protected) | ~210 pages + ~210 store-search calls + 4 REST pages |
-| www.piavetdirectory.com.au | 1 s | ~2,230 pages + 23 REST pages |
 | www.vet.net.au | 1 s | ~1,120 pages + 1 sitemap |
 | abr.business.gov.au | 0.5 s | 2 per clinic |
 | places.googleapis.com | 0.1 s | 1 per clinic |
@@ -202,6 +202,24 @@ export GOOGLE_PLACES_API_KEY=...
 jbang VetDb.java enrich-google --budget 500
 jbang VetDb.java export
 
+# Fresh dated full run, similar to result-2026-10-20/ but without PIA
+mkdir -p result-2026-10-26
+jbang VetDb.java fetch --refresh \
+  --db result-2026-10-26/vetdb.sqlite \
+  --cache cache
+export ABR_GUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+jbang VetDb.java enrich-abr \
+  --db result-2026-10-26/vetdb.sqlite \
+  --cache cache
+export GOOGLE_PLACES_API_KEY=...
+jbang VetDb.java enrich-google \
+  --db result-2026-10-26/vetdb.sqlite \
+  --cache cache \
+  --budget 5000
+jbang VetDb.java export \
+  --db result-2026-10-26/vetdb.sqlite \
+  --out result-2026-10-26
+
 # Keep a separate data set (another database, cache and output folder)
 jbang VetDb.java all --db data/test.sqlite --cache data/cache --out data/out --limit 50
 
@@ -224,9 +242,9 @@ The CSV files start with a UTF-8 BOM so Excel shows accents correctly.
 
 ### Columns
 
-`clinic_id, name, category, street, suburb, state, postcode, latitude, longitude, website, phone, email, facebook, instagram, other_socials, species_treated, home_mobile_visits, services, opening_hours, google_review_count, google_rating, directory_rating, after_hours_emergency, number_of_vets, number_of_staff, book_online, booking_url, telehealth, parasite_pilot, payment_options, digital_payment, payment_plan, wellness_plan, abn, registered_name, abn_status, abn_registered_from, google_maps_url, google_business_status, ratemyvet_url, bestforpet_url, pia_url, vetnet_url, sources, verification_status, flags`
+`clinic_id, name, category, street, suburb, state, postcode, latitude, longitude, website, phone, email, facebook, instagram, other_socials, species_treated, home_mobile_visits, services, opening_hours, google_review_count, google_rating, directory_rating, after_hours_emergency, number_of_vets, number_of_staff, book_online, booking_url, telehealth, parasite_pilot, payment_options, digital_payment, payment_plan, wellness_plan, abn, registered_name, abn_status, abn_registered_from, google_maps_url, google_business_status, ratemyvet_url, bestforpet_url, vetnet_url, sources, verification_status, flags`
 
-A blank value means no source gave it; nothing is guessed. None of the four directories publishes telehealth, parasite pilot participation or an established date, so those stay blank. `abn_registered_from` is the date the ABN became active, not necessarily the year the clinic opened.
+A blank value means no source gave it; nothing is guessed. None of the active directories publishes telehealth, parasite pilot participation or an established date, so those stay blank. `abn_registered_from` is the date the ABN became active, not necessarily the year the clinic opened.
 
 Y/N columns are `Y` when any source says yes, `N` only when a source explicitly says no, and blank otherwise.
 
@@ -245,7 +263,8 @@ Two listings are the same clinic when:
 
 1. they have the same street number, street and postcode (unit numbers ignored) and similar names, or
 2. they share a phone number (13/1300/1800 numbers and numbers used in 3+ postcodes don't count) and are in the same postcode or within 1 km, or
-3. they are within 75 m of each other with very similar names.
+3. they share a phone number, have very similar names, and one listing is missing enough location detail to prove the locations differ, or
+4. they are within 75 m of each other with very similar names.
 
 Listings at the same address that don't pass any rule stay separate and get a `SAME_ADDRESS_AS_<id>` flag. For each field, the value comes from the source most likely to be right (for example RateMyVet for address and phone, BestForPet for website and email). The `provenance` column in SQLite records which source each value came from.
 

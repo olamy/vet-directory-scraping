@@ -75,6 +75,22 @@ class MergerTest {
     }
 
     @Test
+    void samePhoneAndNameMergeWhenOneListingHasNoLocation() {
+        SourceRecord complete = record("ratemyvet", "a", "Vets at Amaroo", "Shop 1 2 Emerald Way", "2914", "(02) 6230 2262");
+        SourceRecord partial = record("ratemyvet", "b", "Vets at Amaroo", null, null, "02 6230 2262");
+        List<Clinic> clinics = Merger.merge(List.of(complete, partial), Map.of());
+        assertEquals(1, clinics.size());
+        assertEquals("same_phone_name", clinics.getFirst().matchRules().get(partial.key()));
+    }
+
+    @Test
+    void samePhoneAndNameDoesNotMergeConflictingPostcodes() {
+        SourceRecord a = record("ratemyvet", "a", "Chain Vet", "1 Alpha St", "2000", "(02) 9000 0003");
+        SourceRecord b = record("ratemyvet", "b", "Chain Vet", "9 Beta Rd", "2150", "02 9000 0003");
+        assertEquals(2, Merger.merge(List.of(a, b), Map.of()).size());
+    }
+
+    @Test
     void chainNumbersDoNotMerge() {
         SourceRecord a = record("ratemyvet", "a", "Greencross Vets Alpha", "1 Alpha St", "2100", "1300 000 111");
         SourceRecord b = record("ratemyvet", "b", "Greencross Vets Beta", "9 Beta Rd", "2100", "1300 000 111");
@@ -129,11 +145,11 @@ class MergerTest {
 
     @Test
     void abrMatchVerifiesASingleSourceClinic() {
-        SourceRecord a = record("pia", "x", "Bush Vet", "7 Gum Rd", "2400", "(02) 6000 0005");
+        SourceRecord a = record("ratemyvet", "x", "Bush Vet", "7 Gum Rd", "2400", "(02) 6000 0005");
         Clinic plain = Merger.merge(List.of(a), Map.of()).getFirst();
         assertEquals(Clinic.Verification.SINGLE_SOURCE, plain.verification());
 
-        Map<String, Map<String, Enrichment>> enrichment = Map.of("abr", Map.of("pia:x", new Enrichment("abr", "pia:x", "MATCHED",
+        Map<String, Map<String, Enrichment>> enrichment = Map.of("abr", Map.of("ratemyvet:x", new Enrichment("abr", "ratemyvet:x", "MATCHED",
             Map.of(Field.ABN, "12 345 678 901", Field.ABN_STATUS, "Active", Field.REGISTERED_NAME, "BUSH VET PTY LTD"))));
         Clinic enriched = Merger.merge(List.of(a), enrichment).getFirst();
         assertEquals(Clinic.Verification.VERIFIED, enriched.verification());

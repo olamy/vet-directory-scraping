@@ -24,14 +24,16 @@ import vetdb.model.SourceRecord;
  * Two records are the same clinic when:
  * 1. they share an address key and their names are similar (0.80 or more), or
  * 2. they share a phone number (not a 13/1300/1800 one) and the same postcode or are within 1 km, or
- * 3. they are within 75 m and their names are very similar (0.85 or more).
- * Records at the same address that fail all three stay apart and get a SAME_ADDRESS flag.
+ * 3. they share a phone number, their names are very similar, and their locations do not conflict, or
+ * 4. they are within 75 m and their names are very similar (0.85 or more).
+ * Records at the same address that fail these rules stay apart and get a SAME_ADDRESS flag.
  */
 public final class Merger {
 
     public static final List<String> SOURCE_ORDER = List.of("ratemyvet", "vetnet", "bestforpet", "pia");
 
     static final double SAME_ADDRESS_NAME = 0.80;
+    static final double SAME_PHONE_NAME = 0.90;
     static final double NEARBY_NAME = 0.85;
     static final double NEARBY_METRES = 75;
     static final double PHONE_METRES = 1000;
@@ -96,6 +98,8 @@ public final class Merger {
                 rule = "same_address";
             } else if (samePhone && (samePostcode || (metres != null && metres <= PHONE_METRES))) {
                 rule = "same_phone";
+            } else if (samePhone && similarity >= SAME_PHONE_NAME && locationsDoNotConflict(ra, rb, metres)) {
+                rule = "same_phone_name";
             } else if (metres != null && metres <= NEARBY_METRES && similarity >= NEARBY_NAME) {
                 rule = "nearby_same_name";
             } else if (sameAddr) {
@@ -229,6 +233,16 @@ public final class Merger {
             return null;
         }
         return MatchKeys.distance(a.latitude(), a.longitude(), b.latitude(), b.longitude());
+    }
+
+    /** True when a missing postcode/coordinate prevents the usual same-phone rule, but nothing says the locations differ. */
+    private static boolean locationsDoNotConflict(SourceRecord a, SourceRecord b, Double metres) {
+        String pa = a.get(Field.POSTCODE);
+        String pb = b.get(Field.POSTCODE);
+        if (pa != null && pb != null && !pa.equals(pb)) {
+            return metres != null && metres <= PHONE_METRES;
+        }
+        return metres == null || metres <= PHONE_METRES;
     }
 
     // ------------------------------------------------------------------ building one clinic

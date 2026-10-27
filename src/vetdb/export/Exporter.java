@@ -22,7 +22,7 @@ import vetdb.model.SourceRecord;
 /** Writes the merged clinics (and the raw records) to CSV files and one Excel workbook. */
 public final class Exporter {
 
-    private static final List<String> SOURCES = List.of("ratemyvet", "bestforpet", "pia", "vetnet");
+    private static final List<String> SOURCES = List.of("ratemyvet", "bestforpet", "vetnet");
     private static final Set<Field> NUMERIC = Set.of(Field.LATITUDE, Field.LONGITUDE, Field.GOOGLE_REVIEW_COUNT,
         Field.GOOGLE_RATING, Field.DIRECTORY_RATING, Field.NUMBER_OF_VETS, Field.NUMBER_OF_STAFF);
     /** Flags worth a human look even when the clinic is otherwise fine. */
