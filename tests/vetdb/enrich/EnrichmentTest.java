@@ -58,14 +58,63 @@ class EnrichmentTest {
             [{"Abn":"11111111111","Name":"Lakeside Veterinary Hospital","Postcode":"3000","State":"VIC","Score":100},
              {"Abn":"74172177893","Name":"LAKESIDE VETERINARY HOSPITAL PTY LTD","Postcode":"2200","State":"NSW","Score":96}]
             """);
-        assertEquals("74172177893", AbrClient.pickAbn(names, "Lakeside Veterinary Hospital", "2200", "NSW"));
-        assertNull(AbrClient.pickAbn(names, "Lakeside Veterinary Hospital", "4000", "QLD"));
+        assertEquals(new AbrClient.Pick("74172177893", List.of()), AbrClient.pickAbn(names, "Lakeside Veterinary Hospital", "2200", "NSW"));
+        assertEquals(new AbrClient.Pick(null, List.of()), AbrClient.pickAbn(names, "Lakeside Veterinary Hospital", "4000", "QLD"));
+    }
 
+    @Test
+    void abrListsTheCandidatesWhenTheSameNameIsOnTwoActiveAbns() {
         JsonNode tie = Fixtures.json("""
-            [{"Abn":"22222222222","Name":"Lakeside Vet","Postcode":"2200","State":"NSW","Score":100},
-             {"Abn":"33333333333","Name":"Lakeside Vet","Postcode":"2200","State":"NSW","Score":100}]
+            [{"Abn":"22222222222","Name":"Lakeside Vet","Postcode":"2200","State":"NSW","Score":100,"AbnStatus":"0000000001","NameType":"Business Name"},
+             {"Abn":"33333333333","Name":"LAKESIDE VET","Postcode":"2200","State":"NSW","Score":100,"AbnStatus":"0000000001","NameType":"Business Name"}]
             """);
-        assertEquals("AMBIGUOUS", AbrClient.pickAbn(tie, "Lakeside Vet", "2200", "NSW"));
+        assertEquals(new AbrClient.Pick(null, List.of("Lakeside Vet (22 222 222 222)", "LAKESIDE VET (33 333 333 333)")),
+            AbrClient.pickAbn(tie, "Lakeside Vet", "2200", "NSW"));
+    }
+
+    @Test
+    void abrPrefersTheActiveAbnButKeepsACancelledOneWhenItIsAllThereIs() {
+        JsonNode sold = Fixtures.json("""
+            [{"Abn":"22222222222","Name":"Lakeside Vet","Postcode":"2200","State":"NSW","Score":100,"AbnStatus":"0000000002","NameType":"Business Name"},
+             {"Abn":"33333333333","Name":"Lakeside Vet","Postcode":"2200","State":"NSW","Score":100,"AbnStatus":"0000000001","NameType":"Business Name"}]
+            """);
+        assertEquals("33333333333", AbrClient.pickAbn(sold, "Lakeside Vet", "2200", "NSW").abn());
+
+        JsonNode closed = Fixtures.json("""
+            [{"Abn":"22222222222","Name":"Lakeside Vet","Postcode":"2200","State":"NSW","Score":100,"AbnStatus":"0000000002","NameType":"Business Name"}]
+            """);
+        assertEquals("22222222222", AbrClient.pickAbn(closed, "Lakeside Vet", "2200", "NSW").abn());
+    }
+
+    @Test
+    void abrBreaksTiesOnTheFullNameThenTheNameType() {
+        // Both reach a perfect score ("neutral bay" is part of the clinic name), the full name settles it.
+        JsonNode names = Fixtures.json("""
+            [{"Abn":"98031062933","Name":"NEUTRAL BAY VETERINARY SURGERY","Postcode":"2089","State":"NSW","Score":90,"NameType":"Trading Name"},
+             {"Abn":"75619455346","Name":"4 PAWS NEUTRAL BAY VETERINARY CLINIC","Postcode":"2089","State":"NSW","Score":90,"NameType":"Business Name"}]
+            """);
+        assertEquals("75619455346", AbrClient.pickAbn(names, "4 Paws Vet Neutral Bay", "2089", "NSW").abn());
+
+        JsonNode sameName = Fixtures.json("""
+            [{"Abn":"21885376414","Name":"ACACIA VETERINARY SURGERY","Postcode":"4703","State":"QLD","Score":100,"NameType":"Trading Name"},
+             {"Abn":"12792813942","Name":"Acacia Veterinary Surgery","Postcode":"4703","State":"QLD","Score":100,"NameType":"Business Name"}]
+            """);
+        assertEquals("12792813942", AbrClient.pickAbn(sameName, "Acacia Veterinary Surgery", "4703", "QLD").abn());
+    }
+
+    @Test
+    void abrSkipsOtherTradesButReadsTrustNames() {
+        JsonNode names = Fixtures.json("""
+            [{"Abn":"22585632581","Name":"ALBION PARK RAIL FLORIST","Postcode":"2527","State":"NSW","Score":94},
+             {"Abn":"55555555555","Name":"DALBY & DISTRICT FUNERAL SERVICES","Postcode":"4405","State":"QLD","Score":94}]
+            """);
+        assertEquals(new AbrClient.Pick(null, List.of()), AbrClient.pickAbn(names, "Albion Park Rail Veterinary Surgery", "2527", "NSW"));
+        assertEquals(new AbrClient.Pick(null, List.of()), AbrClient.pickAbn(names, "Dalby and District Veterinary Services", "4405", "QLD"));
+
+        JsonNode trust = Fixtures.json("""
+            [{"Abn":"66666666666","Name":"The Trustee for Googong Veterinary Centre Unit Trust","Postcode":"2620","State":"NSW","Score":80}]
+            """);
+        assertEquals("66666666666", AbrClient.pickAbn(trust, "Googong Veterinary Centre", "2620", "NSW").abn());
     }
 
     @Test

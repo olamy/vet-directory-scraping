@@ -8,7 +8,7 @@ A JBang tool that builds one clean database of Australian vet clinics and hospit
 | [BestForPet](https://bestforpet.com.au/find-a-vet/) (~210 clinics) | Email, opening hours, team size, services, payment plans, wellness plan, online booking |
 | [vet.net.au](https://www.vet.net.au/) (~1,100 clinics) | Opening hours, staff list, Facebook/Instagram, pet services |
 
-Optionally it adds [ABN Lookup](https://abr.business.gov.au/) data (ABN, registered name, ABN status and date) and [Google Places](https://developers.google.com/maps/documentation/places/web-service/text-search) data (Maps link, rating, review count, closed check).
+Optionally it adds [ABN Lookup](https://abr.business.gov.au/) data (ABN, registered name, ABN status and date) and [Google Places](https://developers.google.com/maps/documentation/places/web-service/text-search) data (Maps link, rating, review count, closed check). To add ABNs to a CSV file you already have, see [Adding ABNs to a CSV file](#adding-abns-to-a-csv-file).
 
 The old [PIA Vet Directory](https://www.piavetdirectory.com.au/) source is intentionally ignored by the main pipeline because its mostly 2016 listings create many stale duplicate clinics. Existing `pia` records in an older SQLite database are skipped during merge, enrichment and export.
 
@@ -154,7 +154,7 @@ Runs `fetch` (with `--source` and `--limit`), then `enrich-abr` on every clinic 
 
 | Variable | Used by | Meaning |
 |---|---|---|
-| `ABR_GUID` | `enrich-abr`, `all` | GUID for the ABN Lookup web services (free) |
+| `ABR_GUID` | `enrich-abr`, `all`, `AbnLookup.java` | GUID for the ABN Lookup web services (free) |
 | `GOOGLE_PLACES_API_KEY` | `enrich-google`, `all` | Google Places API (New) key (paid) |
 
 ### Exit codes
@@ -225,6 +225,49 @@ jbang VetDb.java all --db data/test.sqlite --cache data/cache --out data/out --l
 
 # Only two sites
 jbang VetDb.java fetch --source bestforpet,vetnet
+```
+
+## Adding ABNs to a CSV file
+
+`AbnLookup.java` is a separate JBang script that looks up the ABN of every row in a CSV file of clinics, for example an edited copy of `clinics.csv`, and adds the result to each row. It doesn't use the SQLite database.
+
+```text
+ABR_GUID=<guid> jbang AbnLookup.java <csv> [--out=<file>] [--limit=<n>] [--refresh] [--cache=<folder>] [--user-agent=<text>]
+```
+
+| Option | Meaning |
+|---|---|
+| `<csv>` | The CSV file to read. It is updated in place unless `--out` is given |
+| `-o`, `--out` | Write the result to this file instead and leave `<csv>` as it is |
+| `--limit` | Only look up the first N rows (default `0`, all of them). The other rows keep the ABN values they already had |
+| `--refresh` | Ask ABN Lookup again instead of using the cached answers |
+| `--cache`, `--user-agent` | See the shared options above |
+
+The CSV needs a header row with `Clinic name`, `Postcode` and `State` columns (case doesn't matter). Five columns are added at the end of each row:
+
+| Column | Content |
+|---|---|
+| `ABN` | The ABN, written as `74 172 177 893` (the spaces stop Excel from turning it into a number) |
+| `ABN registered name` | The entity name registered for that ABN, handy to check the match is the right business |
+| `ABN status` | `Active` or `Cancelled` |
+| `ABN match` | `MATCHED`, `NOT_FOUND`, `AMBIGUOUS` (two different ABNs fit equally well) or `ERROR` (the call failed) |
+| `ABN candidates` | For `AMBIGUOUS` rows, the names and ABNs that tied, e.g. `Fox Valley Animal Hospital (72 640 960 390); FOX VALLEY ANIMAL HOSPITAL PTY LTD (93 097 744 584)`, so you can pick one by hand |
+
+- Needs `ABR_GUID`, like `enrich-abr`. Without it the script prints a message and exits with code `1`.
+- Matching works like `enrich-abr` (same code). ABN Lookup is searched by clinic name, and a result is only kept when it is in the same postcode with a name score of 0.90 or more, or in the same state with 0.98 or more. Postcode and state are cleaned first, so `800` and `Northern Territory` work.
+- Names compare without the vet words or the legal wording, so `The Trustee for Googong Veterinary Centre Unit Trust` matches `Googong Veterinary Centre`. Another trade sharing the clinic's place name, such as `Albion Park Rail Florist`, is never kept.
+- When several ABNs score the same: an active ABN wins over a cancelled one (a clinic that changed hands keeps its name on the old ABN), then the closest full name, then Business and Entity names over Trading names (ABR stopped updating those in 2012). A cancelled ABN is still used when nothing active fits, and its `ABN status` says `Cancelled`.
+- `AMBIGUOUS` is what's left: usually the exact same name on two active ABNs, like a company and a trust, or an old and a new owner. About 1 row in 8 on the current list.
+- `MATCHED` is a best guess on the name. Check the `ABN registered name` column; a name like `Broadwater Surgery` could be a GP rather than the vet.
+- Each row takes one or two calls (name search, then ABN details when there is a match), with 0.5 s between calls. That's about 30 to 60 minutes for 3,650 rows.
+- Running it again is safe and quick. The ABN columns are replaced, not added a second time, and the answers come from the cache (shared with `enrich-abr`), so only rows that ended in `ERROR` go back to ABN Lookup.
+- The result is written under a temporary name and only swapped in at the end, so a failed run (or a GUID that ABR refuses) leaves the original file untouched.
+- The UTF-8 BOM, the line endings and the other columns are kept as they were.
+
+```bash
+export ABR_GUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+jbang AbnLookup.java clinics-abn.csv --limit 25   # check the first 25 rows
+jbang AbnLookup.java clinics-abn.csv              # then every row
 ```
 
 ## Output (`out/`)
